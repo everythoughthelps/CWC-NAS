@@ -60,12 +60,13 @@ class Cell(nn.Module):
 
 class Network(nn.Module):
 
-  def __init__(self, C, num_classes, layers, criterion, steps=4, multiplier=4, stem_multiplier=3):
+  def __init__(self, C, num_classes, layers, criterion,kd_criterion, steps=4, multiplier=4, stem_multiplier=3):
     super(Network, self).__init__()
     self._C = C
     self._num_classes = num_classes
     self._layers = layers
     self._criterion = criterion
+    self._kd_criterion = kd_criterion
     self._steps = steps
     self._multiplier = multiplier
 
@@ -112,9 +113,13 @@ class Network(nn.Module):
     logits = self.classifier(out.view(out.size(0),-1))
     return logits
 
-  def _loss(self, input, target):
-    logits = self(input)
-    return self._criterion(logits, target) 
+  def _loss(self, input, target,batch_size,lamda):
+
+    logits = self(input[:batch_size//2])
+    with torch.no_grad():
+      logits_cls = self(input[batch_size//2:])
+
+    return self._criterion(logits, target[:batch_size//2]) + lamda * self._kd_criterion(logits,logits_cls.detach())
 
   def _initialize_alphas(self):
     k = sum(1 for i in range(self._steps) for n in range(2+i))

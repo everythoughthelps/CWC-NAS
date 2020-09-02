@@ -12,8 +12,9 @@ import torch.utils
 import torch.nn.functional as F
 import torchvision.datasets as dset
 import torch.backends.cudnn as cudnn
+import dataset
+import kd_loss
 
-from torch.autograd import Variable
 from model_search import Network
 from architect import Architect
 
@@ -41,6 +42,9 @@ parser.add_argument('--train_portion', type=float, default=0.5, help='portion of
 parser.add_argument('--unrolled', action='store_true', default=False, help='use one-step unrolled validation loss')
 parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+parser.add_argument('--pair_batch_size', type=float, default=3, help='')
+parser.add_argument('--temp', default=4.0, type=float, help='temperature scaling')
+parser.add_argument('--lamda', default=1.0, type=float, help='cls loss weight ratio')
 args = parser.parse_args()
 
 args.save = 'search-{}-{}'.format(args.save, time.strftime("%Y%m%d-%H%M%S"))
@@ -57,6 +61,48 @@ logging.getLogger().addHandler(fh)
 CIFAR_CLASSES = 10
 
 
+def train(train_queue, valid_queue, model, architect, criterion,kd_criterion, optimizer, lr):
+  objs = utils.AvgrageMeter()
+  top1 = utils.AvgrageMeter()
+  top5 = utils.AvgrageMeter()
+
+  for step, (input, target) in enumerate(train_queue):
+    model.train()
+    n = input.size(0)
+
+    input = input.cuda()
+    target = target.cuda()
+
+    # get a random minibatch from the search queue with replacement
+    input_search, target_search = next(iter(valid_queue))
+    input_search = input_search.cuda()
+    target_search = target_search.cuda()
+
+    architect.step(input, target,
+                   input_search, target_search, args.batch,args.lamda,lr, optimizer, unrolled=args.unrolled)
+
+    optimizer.zero_grad()
+    logits = model(input[:args.batch_size//2])
+    loss = criterion(logits, target[:args.batch_size//2])
+    with torch.no_grad():
+      logits_cls = model(input[args.batch_size//2:])
+    cls_loss = kd_criterion(logits,logits_cls.detach())
+
+    loss += args.lamda * cls_loss
+
+    loss.backward()
+    nn.utils.clip_grad_norm(model.parameters(), args.grad_clip)
+    optimizer.step()
+
+    prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
+    objs.update(loss.data[0], n)
+    top1.update(prec1.data[0], n)
+    top5.update(prec5.data[0], n)
+
+    if step % args.report_freq == 0:
+      logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
+
+  return top1.avg, objs.avg
 def main():
   if not torch.cuda.is_available():
     logging.info('no gpu device available')
@@ -73,7 +119,8 @@ def main():
 
   criterion = nn.CrossEntropyLoss()
   criterion = criterion.cuda()
-  model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion)
+  KD_loss = kd_loss.KDLoss(args.temp)
+  model = Network(args.init_channels, CIFAR_CLASSES, args.layers, criterion,KD_loss)
   model = model.cuda()
   logging.info("param size = %fMB", utils.count_parameters_in_MB(model))
 
@@ -84,20 +131,23 @@ def main():
       weight_decay=args.weight_decay)
 
   train_transform, valid_transform = utils._data_transforms_cifar10(args)
-  train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
+  all_train_data = dset.CIFAR10(root=args.data, train=True, download=True, transform=train_transform)
 
-  num_train = len(train_data)
+  num_train = len(all_train_data)
   indices = list(range(num_train))
   split = int(np.floor(args.train_portion * num_train))
 
+  train_data = all_train_data[:split]
+  infer_data = all_train_data[split:num_train]
+
   train_queue = torch.utils.data.DataLoader(
       train_data, batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[:split]),
+      sampler=dataset.PairBatchSampler(train_data,args.pair_batch_size),
       pin_memory=True, num_workers=2)
 
   valid_queue = torch.utils.data.DataLoader(
-      train_data, batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[split:num_train]),
+      infer_data, batch_size=args.batch_size,
+      sampler=dataset.PairBatchSampler(infer_data,args.pair_batch_size),
       pin_memory=True, num_workers=2)
 
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -117,7 +167,7 @@ def main():
     print(F.softmax(model.alphas_reduce, dim=-1))
 
     # training
-    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion, optimizer, lr)
+    train_acc, train_obj = train(train_queue, valid_queue, model, architect, criterion,KD_loss, optimizer, lr)
     logging.info('train_acc %f', train_acc)
 
     # validation
@@ -127,42 +177,6 @@ def main():
     utils.save(model, os.path.join(args.save, 'weights.pt'))
 
 
-def train(train_queue, valid_queue, model, architect, criterion, optimizer, lr):
-  objs = utils.AvgrageMeter()
-  top1 = utils.AvgrageMeter()
-  top5 = utils.AvgrageMeter()
-
-  for step, (input, target) in enumerate(train_queue):
-    model.train()
-    n = input.size(0)
-
-    input = Variable(input, requires_grad=False).cuda()
-    target = Variable(target, requires_grad=False).cuda(async=True)
-
-    # get a random minibatch from the search queue with replacement
-    input_search, target_search = next(iter(valid_queue))
-    input_search = Variable(input_search, requires_grad=False).cuda()
-    target_search = Variable(target_search, requires_grad=False).cuda(async=True)
-
-    architect.step(input, target, input_search, target_search, lr, optimizer, unrolled=args.unrolled)
-
-    optimizer.zero_grad()
-    logits = model(input)
-    loss = criterion(logits, target)
-
-    loss.backward()
-    nn.utils.clip_grad_norm(model.parameters(), args.grad_clip)
-    optimizer.step()
-
-    prec1, prec5 = utils.accuracy(logits, target, topk=(1, 5))
-    objs.update(loss.data[0], n)
-    top1.update(prec1.data[0], n)
-    top5.update(prec5.data[0], n)
-
-    if step % args.report_freq == 0:
-      logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
-
-  return top1.avg, objs.avg
 
 
 def infer(valid_queue, model, criterion):
@@ -172,8 +186,8 @@ def infer(valid_queue, model, criterion):
   model.eval()
 
   for step, (input, target) in enumerate(valid_queue):
-    input = Variable(input, volatile=True).cuda()
-    target = Variable(target, volatile=True).cuda(async=True)
+    input = input.cuda()
+    target = target.cuda()
 
     logits = model(input)
     loss = criterion(logits, target)

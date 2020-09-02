@@ -16,9 +16,10 @@ class Architect(object):
     self.model = model
     self.optimizer = torch.optim.Adam(self.model.arch_parameters(),
         lr=args.arch_learning_rate, betas=(0.5, 0.999), weight_decay=args.arch_weight_decay)
+    self.args = args
 
-  def _compute_unrolled_model(self, input, target, eta, network_optimizer):
-    loss = self.model._loss(input, target)
+  def _compute_unrolled_model(self, input, target, batch_size,lamda,eta, network_optimizer):
+    loss = self.model._loss(input, target,batch_size,lamda)
     theta = _concat(self.model.parameters()).data
     try:
       moment = _concat(network_optimizer.state[v]['momentum_buffer'] for v in self.model.parameters()).mul_(self.network_momentum)
@@ -28,21 +29,21 @@ class Architect(object):
     unrolled_model = self._construct_model_from_theta(theta.sub(eta, moment+dtheta))
     return unrolled_model
 
-  def step(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer, unrolled):
+  def step(self, input_train, target_train, input_valid, target_valid, batch_size,lamda,eta, network_optimizer, unrolled):
     self.optimizer.zero_grad()
     if unrolled:
-        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, eta, network_optimizer)
+        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, batch_size,lamda,eta, network_optimizer)
     else:
-        self._backward_step(input_valid, target_valid)
+        self._backward_step(input_valid, target_valid,self.args.batch_size,self.args.lamda)
     self.optimizer.step()
 
-  def _backward_step(self, input_valid, target_valid):
-    loss = self.model._loss(input_valid, target_valid)
+  def _backward_step(self, input_valid, target_valid,batch_size,lamda):
+    loss = self.model._loss(input_valid, target_valid,batch_size,lamda)
     loss.backward()
 
-  def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, eta, network_optimizer):
-    unrolled_model = self._compute_unrolled_model(input_train, target_train, eta, network_optimizer)
-    unrolled_loss = unrolled_model._loss(input_valid, target_valid)
+  def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, batchsize,lamda,eta, network_optimizer):
+    unrolled_model = self._compute_unrolled_model(input_train, target_train, batchsize,lamda, eta,network_optimizer)
+    unrolled_loss = unrolled_model._loss(input_valid, target_valid,batchsize,lamda)
 
     unrolled_loss.backward()
     dalpha = [v.grad for v in unrolled_model.arch_parameters()]

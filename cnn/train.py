@@ -52,7 +52,6 @@ logging.getLogger().addHandler(fh)
 
 CIFAR_CLASSES = 10
 
-
 def main():
   if not torch.cuda.is_available():
     logging.info('no gpu device available')
@@ -84,15 +83,9 @@ def main():
   kdloss = KDLoss(args.temp)
 
   if not args.cls:
-    train_data, valid_data= dataset.load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
+    train_queue, valid_queue= dataset.load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
   else:
-    train_data, valid_data= dataset.load_dataset(args.dataset, args.dataroot, 'pair', batch_size=args.batch_size)
-
-  train_queue = torch.utils.data.DataLoader(
-      train_data, batch_size=args.batch_size, shuffle=True, pin_memory=True, num_workers=2)
-
-  valid_queue = torch.utils.data.DataLoader(
-      valid_data, batch_size=args.batch_size, shuffle=False, pin_memory=True, num_workers=2)
+    train_queue, valid_queue= dataset.load_dataset(args.dataset, args.dataroot, 'pair', batch_size=args.batch_size)
 
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, float(args.epochs))
 
@@ -177,6 +170,7 @@ def main():
     logging.info('valid_acc %f', valid_acc)
 
     utils.save(model, os.path.join(args.save, 'weights.pt'))
+
 
 if __name__ == '__main__':
   main() 
