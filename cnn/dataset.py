@@ -3,6 +3,7 @@ import torchvision, numpy as np, random, os
 import warnings
 
 from torch.utils.data import Sampler, Dataset, DataLoader, BatchSampler,SequentialSampler, RandomSampler
+from torch.utils.data import Subset
 from torchvision import transforms, datasets
 from collections import defaultdict
 
@@ -38,8 +39,8 @@ class PairBatchSampler(Sampler):
 			return self.num_iterations
 
 
-class DatasetWrapper(Dataset):
-	# Additinoal attributes
+class DatasetWrapper():
+	# AdditinoalDataset attributes
 	# - indices
 	# - classwise_indices
 	# - num_classes
@@ -235,7 +236,8 @@ def load_dataset(name, root, sample='default', **kwargs):
 		else:
 			CIFAR = datasets.CIFAR100
 
-		trainset = DatasetWrapper(CIFAR(root, train=True,  download=True, transform=transform_train))
+		trainset = DatasetWrapper(CIFAR(root, train=True,  download=True, transform=transform_train),range(0,25000))
+		inferset = DatasetWrapper(CIFAR(root, train=True,  download=True, transform=transform_train),range(25000,50000))
 		valset   = DatasetWrapper(CIFAR(root, train=False, download=True, transform=transform_test))
 	else:
 		raise Exception('Unknown dataset: {}'.format(name))
@@ -243,17 +245,20 @@ def load_dataset(name, root, sample='default', **kwargs):
 	# Sampler
 	if sample == 'default':
 		get_train_sampler = lambda d: BatchSampler(RandomSampler(d), kwargs['batch_size'], False)
+		get_infer_sampler = lambda d: BatchSampler(RandomSampler(d), kwargs['batch_size'], False)
 		get_test_sampler  = lambda d: BatchSampler(SequentialSampler(d), kwargs['batch_size'], False)
 
 	elif sample == 'pair':
 		get_train_sampler = lambda d: PairBatchSampler(d, kwargs['batch_size'])
+		get_infer_sampler = lambda d: PairBatchSampler(d, kwargs['batch_size'])
 		get_test_sampler  = lambda d: BatchSampler(SequentialSampler(d), kwargs['batch_size'], False)
 
 	else:
 		raise Exception('Unknown sampling: {}'.format(sample))
 
 	trainloader = DataLoader(trainset, batch_sampler=get_train_sampler(trainset), num_workers=4)
+	inferloader = DataLoader(inferset, batch_sampler=get_infer_sampler(inferset), num_workers=4)
 	valloader   = DataLoader(valset,   batch_sampler=get_test_sampler(valset), num_workers=4)
 
-	return trainloader, valloader
+	return trainloader, inferloader,valloader
 

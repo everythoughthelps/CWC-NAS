@@ -29,16 +29,16 @@ class Architect(object):
     unrolled_model = self._construct_model_from_theta(theta.sub(eta, moment+dtheta))
     return unrolled_model
 
-  def step(self, input_train, target_train, input_valid, target_valid, batch_size,lamda,eta, network_optimizer, unrolled):
+  def step(self, input_train, target_train, input_valid, target_valid, lamda,eta, network_optimizer, unrolled):
     self.optimizer.zero_grad()
     if unrolled:
-        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, batch_size,lamda,eta, network_optimizer)
+        self._backward_step_unrolled(input_train, target_train, input_valid, target_valid, lamda,eta, network_optimizer)
     else:
-        self._backward_step(input_valid, target_valid,self.args.batch_size,self.args.lamda)
+        self._backward_step(input_valid, target_valid,self.args.lamda)
     self.optimizer.step()
 
-  def _backward_step(self, input_valid, target_valid,batch_size,lamda):
-    loss = self.model._loss(input_valid, target_valid,batch_size,lamda)
+  def _backward_step(self, input_valid, target_valid,lamda):
+    loss = self.model._loss(input_valid, target_valid,lamda)
     loss.backward()
 
   def _backward_step_unrolled(self, input_train, target_train, input_valid, target_valid, batchsize,lamda,eta, network_optimizer):

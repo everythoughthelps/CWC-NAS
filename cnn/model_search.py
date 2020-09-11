@@ -113,12 +113,12 @@ class Network(nn.Module):
     logits = self.classifier(out.view(out.size(0),-1))
     return logits
 
-  def _loss(self, input, target,batch_size,lamda):
+  def _loss(self, input, target,lamda):
+    batch_size = input.size(0)
 
     logits = self(input[:batch_size//2])
     with torch.no_grad():
       logits_cls = self(input[batch_size//2:])
-
     return self._criterion(logits, target[:batch_size//2]) + lamda * self._kd_criterion(logits,logits_cls.detach())
 
   def _initialize_alphas(self):
