@@ -245,20 +245,22 @@ def load_dataset(name, root, sample='default', **kwargs):
 	# Sampler
 	if sample == 'default':
 		get_train_sampler = lambda d: BatchSampler(RandomSampler(d), kwargs['batch_size'], False)
-		get_infer_sampler = lambda d: BatchSampler(RandomSampler(d), kwargs['batch_size'], False)
+		get_infer_random_sampler = lambda d: BatchSampler(RandomSampler(d), kwargs['batch_size'], False)
 		get_test_sampler  = lambda d: BatchSampler(SequentialSampler(d), kwargs['batch_size'], False)
 
 	elif sample == 'pair':
 		get_train_sampler = lambda d: PairBatchSampler(d, kwargs['batch_size'])
-		get_infer_sampler = lambda d: PairBatchSampler(d, kwargs['batch_size'])
+		get_infer_pair_sampler = lambda d: PairBatchSampler(d, kwargs['batch_size'])
+		get_infer_random_sampler = lambda d: BatchSampler(RandomSampler(d), kwargs['batch_size'], False)
 		get_test_sampler  = lambda d: BatchSampler(SequentialSampler(d), kwargs['batch_size'], False)
 
 	else:
 		raise Exception('Unknown sampling: {}'.format(sample))
 
 	trainloader = DataLoader(trainset, batch_sampler=get_train_sampler(trainset), num_workers=4)
-	inferloader = DataLoader(inferset, batch_sampler=get_infer_sampler(inferset), num_workers=4)
+	infer_pair_loader = DataLoader(inferset, batch_sampler=get_infer_pair_sampler(inferset), num_workers=4)
+	infer_random_loader = DataLoader(inferset, batch_sampler=get_infer_random_sampler(inferset), num_workers=4)
 	valloader   = DataLoader(valset,   batch_sampler=get_test_sampler(valset), num_workers=4)
 
-	return trainloader, inferloader,valloader
+	return trainloader, infer_pair_loader,infer_random_loader,valloader
 

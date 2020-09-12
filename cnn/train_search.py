@@ -105,6 +105,7 @@ def train(train_queue, valid_queue, model, architect, criterion,kd_criterion, op
 
     if step % args.report_freq == 0:
       logging.info('train %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
+    break
 
   return top1.avg, objs.avg
 
@@ -131,7 +132,6 @@ def infer(valid_queue, model, criterion):
 
     if step % args.report_freq == 0:
       logging.info('valid %03d %e %f %f', step, objs.avg, top1.avg, top5.avg)
-    break
 
   return top1.avg, objs.avg
 
@@ -164,12 +164,12 @@ def main():
 
   if not args.cls:
     print('not cls')
-    trainloader, inferloader, valloader = dataset.load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
+    trainloader, infer_pair_loader,infer_random_loader, valloader = dataset.load_dataset(args.dataset, args.dataroot, batch_size=args.batch_size)
   else:
-    trainloader, inferloader, valloader = dataset.load_dataset(args.dataset, args.dataroot, 'pair', batch_size=args.batch_size)
+    trainloader, infer_pair_loader,infer_random_loader, valloader = dataset.load_dataset(args.dataset, args.dataroot, 'pair', batch_size=args.batch_size)
 
   print(len(trainloader))
-  print(len(inferloader))
+  print(len(infer_pair_loader))
   print(len(valloader))
 
   scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -189,11 +189,11 @@ def main():
     print(F.softmax(model.alphas_reduce, dim=-1))
 
     # training
-    train_acc, train_obj = train(trainloader, inferloader, model, architect, criterion,KD_loss, optimizer, lr)
+    train_acc, train_obj = train(trainloader, infer_pair_loader, model, architect, criterion,KD_loss, optimizer, lr)
     logging.info('train_acc %f', train_acc)
 
     # validation
-    valid_acc, valid_obj = infer(inferloader, model, criterion)
+    valid_acc, valid_obj = infer(infer_random_loader, model, criterion)
     logging.info('valid_acc %f', valid_acc)
 
     utils.save(model, os.path.join(args.save, 'weights.pt'))
